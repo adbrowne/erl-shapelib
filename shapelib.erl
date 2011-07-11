@@ -8,6 +8,16 @@ get_parts(NumParts,Parts) ->
 get_points(Points) ->
   [{X, Y} || <<X:64/little-float,Y:64/little-float>> <= Points].
 
+get_partpoints(PartList, PointList) ->
+  case PartList of
+    [H1] -> {_, This} = lists:split(H1, PointList), [This];
+    [H1, H2 | T] -> 
+      Len = H2 - H1,
+      Start = H1 + 1,
+      io:format("~p ~p ~p~n",[Start, Len, length(PointList)]), 
+      [lists:sublist(PointList, Start, Len) | get_partpoints([H2|T], PointList)]
+  end.
+      
 get_polygon(S, Offset, ContentLength) ->
   {ok, Content} = file:pread(S,Offset,ContentLength * 2),
   io:format("~p~n",[Offset]),
@@ -19,7 +29,8 @@ get_polygon(S, Offset, ContentLength) ->
   <<Parts:PartBits/binary-unit:1,Points:PointBits/binary-unit:1>> = PartsAndPoints,
   PartList = get_parts(NumParts,Parts), 
   PointList = get_points(Points),
-  {Xmin,Ymin,Xmax,Ymax,PartList,PointList}.
+  PartPoints = get_partpoints(PartList, PointList),
+  {Xmin,Ymin,Xmax,Ymax,PartList,PartPoints}.
 
 get_polygons(S,Offset,FileLength) ->
   io:format("~w~n",[Offset]),
