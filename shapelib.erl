@@ -54,30 +54,23 @@ get_shapes(File) ->
       error
   end. 
 
-format_points([],_,notfirst) -> ok;
-format_points([{X,Y}|T], FileHandle, notfirst) ->
-  io:format(FileHandle,"L~p,~p",[X,Y]),
-  format_points(T,FileHandle, notfirst),
-  ok.
+format_points([],notfirst) -> [];
+format_points([{X,Y}|T], notfirst) ->
+  [io_lib:format("L~p,~p",[X,Y])|format_points(T,notfirst)].
 
-format_points([],_) -> ok;
-format_points([{X,Y}|T],FileHandle) ->
-  io:format(FileHandle,"M~p,~p",[X,Y]),
-  format_points(T,FileHandle,notfirst),
-  ok.
+format_points([]) -> [];
+format_points([{X,Y}|T]) ->
+  [io_lib:format("M~p,~p",[X,Y])|format_points(T,notfirst)].
 
-get_scaled_string(Part,{Scale,Xmin,Ymin,Height},FileHandle) ->
+get_scaled_string(Part,{Scale,Xmin,Ymin,Height}) ->
   ScaledPoints = [{(X-Xmin)*Scale, Height-(Y-Ymin) * Scale} || {X,Y} <- Part],
-  format_points(ScaledPoints,FileHandle),
-  io:format(".",[]).
-  %Output = [lists:map(fun(I) -> {X,Y} = I, [io_lib:format("L~p,~p",[X,Y])] end, ScaledPoints)],
-  %Output.
+  io:format(".",[]),
+  format_points(ScaledPoints).
 
-get_scaled_strings_for_polygon(Polygon, ScaleFactors,FileHandle) ->
+get_scaled_strings_for_polygon(Polygon, ScaleFactors,WriterPid) ->
   {_, {Xmin, Ymin, Xmax, Ymax, Parts, Points}} = Polygon,
-  io:format(FileHandle,"\"",[]),
-  [get_scaled_string(X,ScaleFactors,FileHandle) || X <- Points],
-  io:format(FileHandle,"\",~n",[]).
+  PolygonString = [get_scaled_string(X,ScaleFactors) || X <- Points],
+  WriterPid ! {line,io_lib:format("\"~s\",~n",[PolygonString])}.
 
 write_json(ShapeFile, JsonFile,Width, Height) ->
   Shapes = get_shapes(ShapeFile),
@@ -87,6 +80,17 @@ write_json(ShapeFile, JsonFile,Width, Height) ->
   Scale = max(XScale,YScale),
   {ok, S} = file:open(JsonFile, write),
   io:format(S,"MapPoints = [",[]),
-  [get_scaled_strings_for_polygon(X,{Scale,Xmin, Ymin, Height},S) || X <- Polygons],
-  io:format(S,"];",[]),
-  file:close(S). 
+  WriterPid = spawn(fun() -> loop(S) end),
+  [spawn(fun() -> get_scaled_strings_for_polygon(X,{Scale,Xmin, Ymin, Height},WriterPid) end) || X <- Polygons].
+  %WriterPid ! {line,"];"},
+  %WriterPid ! close.
+
+loop(S) ->
+  receive
+    {line, Text} ->
+      io:format(S,"~s",[Text]),
+      loop(S)
+  after 5000 -> 
+      io:format(S,"];",[]),
+      file:close(S)
+  end.
