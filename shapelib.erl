@@ -1,6 +1,6 @@
 -module(shapelib).
 
--export([get_shapes/1]).
+-export([get_shapes/1,write_json/4]).
 
 get_parts(NumParts,Parts) ->
   [X || <<X:32/little-integer>> <= Parts].
@@ -17,7 +17,7 @@ get_partpoints(PartList, PointList) ->
       io:format("~p ~p ~p~n",[Start, Len, length(PointList)]), 
       [lists:sublist(PointList, Start, Len) | get_partpoints([H2|T], PointList)]
   end.
-      
+
 get_polygon(S, Offset, ContentLength) ->
   {ok, Content} = file:pread(S,Offset,ContentLength * 2),
   io:format("~p~n",[Offset]),
@@ -49,7 +49,37 @@ get_shapes(File) ->
       5 = ShapeType,
       Polygons = get_polygons(S,100,FileLength),
       file:close(S),
-      {ok,Version,Polygons};
+      {ok,Version,{Xmin,Ymin,Xmax,Ymax},Polygons};
     _Error ->
       error
   end. 
+
+format_points([],notfirst) -> [];
+format_points([{X,Y}|T], notfirst) ->
+  [io_lib:format("L~p,~p",[X,Y])|format_points(T,notfirst)].
+
+format_points([{X,Y}|T]) ->
+  [io_lib:format("M~p,~p",[X,Y])|format_points(T,notfirst)].
+get_scaled_string(Part,{Scale,Xmin,Ymin,Height}) ->
+  ScaledPoints = [{(X-Xmin)*Scale, Height-(Y-Ymin) * Scale} || {X,Y} <- Part],
+  format_points(ScaledPoints).
+  %Output = [lists:map(fun(I) -> {X,Y} = I, [io_lib:format("L~p,~p",[X,Y])] end, ScaledPoints)],
+  %Output.
+
+get_scaled_strings_for_polygon(Polygon, ScaleFactors) ->
+  {_, {Xmin, Ymin, Xmax, Ymax, Parts, Points}} = Polygon,
+  [get_scaled_string(X,ScaleFactors) || X <- Points].
+
+write_json(ShapeFile, JsonFile,Width, Height) ->
+  Shapes = get_shapes(ShapeFile),
+  {_,_,{Xmin,Ymin,Xmax,Ymax},Polygons} = Shapes,
+  XScale = Width/(Xmax - Xmin),
+  YScale = Height/(Ymax - Ymin),
+  Scale = max(XScale,YScale),
+  DrawnPoints = [get_scaled_strings_for_polygon(X,{Scale,Xmin, Ymin, Height}) || X <- Polygons],
+  DrawnPoints,
+  {ok, S} = file:open(JsonFile, write),
+  io:format(S,"MapPoints = [",[]),
+  [io:format(S, "\"~s\"~n,", [Output]) || Output <- DrawnPoints],
+  io:format(S,"];",[]),
+  file:close(S). 
