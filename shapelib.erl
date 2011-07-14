@@ -2,6 +2,8 @@
 
 -export([get_shapes/1,write_json/4]).
 
+-compile(export_all).
+
 get_parts(NumParts,Parts) ->
   [X || <<X:32/little-integer>> <= Parts].
 
@@ -54,13 +56,13 @@ get_shapes(File) ->
       error
   end. 
 
-format_points([],notfirst) -> [];
-format_points([{X,Y}|T], notfirst) ->
-  [io_lib:format("L~p,~p",[X,Y])|format_points(T,notfirst)].
+format_points([{X,Y}|T],Result, notfirst) ->
+  format_points(T,[io_lib:format("L~p,~p",[X,Y])|Result],notfirst);
+format_points([],Result,notfirst) -> lists:reverse(Result).
 
 format_points([]) -> [];
 format_points([{X,Y}|T]) ->
-  [io_lib:format("M~p,~p",[X,Y])|format_points(T,notfirst)].
+  format_points(T,[io_lib:format("M~p,~p",[X,Y])],notfirst).
 
 get_scaled_string(Part,{Scale,Xmin,Ymin,Height}) ->
   ScaledPoints = [{(X-Xmin)*Scale, Height-(Y-Ymin) * Scale} || {X,Y} <- Part],
@@ -70,7 +72,8 @@ get_scaled_string(Part,{Scale,Xmin,Ymin,Height}) ->
 get_scaled_strings_for_polygon(Polygon, ScaleFactors,WriterPid) ->
   {_, {Xmin, Ymin, Xmax, Ymax, Parts, Points}} = Polygon,
   PolygonString = [get_scaled_string(X,ScaleFactors) || X <- Points],
-  WriterPid ! {line,io_lib:format("\"~s\",~n",[PolygonString])}.
+  WriterPid ! {line,PolygonString},
+  ok.
 
 write_json(ShapeFile, JsonFile,Width, Height) ->
   Shapes = get_shapes(ShapeFile),
@@ -81,16 +84,50 @@ write_json(ShapeFile, JsonFile,Width, Height) ->
   {ok, S} = file:open(JsonFile, write),
   io:format(S,"MapPoints = [",[]),
   WriterPid = spawn(fun() -> loop(S) end),
-  [spawn(fun() -> get_scaled_strings_for_polygon(X,{Scale,Xmin, Ymin, Height},WriterPid) end) || X <- Polygons].
-  %WriterPid ! {line,"];"},
-  %WriterPid ! close.
+  PolygonGroups = split_into_groups(Polygons, 5),
+  io:format("Groups: ~p~n",[length(PolygonGroups)]),
+  pmap1(fun(PSet) -> [get_scaled_strings_for_polygon(X,{Scale,Xmin, Ymin, Height},WriterPid) || X <- PSet] end, PolygonGroups),
+  %[spawn(fun() -> get_scaled_strings_for_polygon(X,{Scale,Xmin, Ymin, Height},WriterPid) end) || X <- Polygons].
+%WriterPid ! {line,"];"},
+  WriterPid ! close.
 
 loop(S) ->
   receive
     {line, Text} ->
-      io:format(S,"~s",[Text]),
-      loop(S)
-  after 5000 -> 
+      io:format(S,"\"",[]),
+      io:put_chars(S,Text),
+      io:format(S,"\",~n",[]),
+      loop(S);
+    close ->
       io:format(S,"];",[]),
       file:close(S)
   end.
+
+split_into_groups_of_size([], _Size) -> [];
+split_into_groups_of_size(List, Size) ->
+  {List1,List2} = lists:split(min(length(List),Size),List),
+  [List1 | split_into_groups_of_size(List2, Size)].
+
+split_into_groups(List, NumberOfGroups) ->
+  Length = length(List),
+  Size = Length div NumberOfGroups + 1,
+  split_into_groups_of_size(List,Size).
+
+pmap1(F, L) -> 
+  S = self(),
+  Ref = erlang:make_ref(),
+  lists:foreach(fun(I) -> 
+        spawn(fun() -> do_f1(S, Ref, F, I) end)
+    end, L),
+  %% gather the results
+  gather1(length(L), Ref, []).
+
+do_f1(Parent, Ref, F, I) ->					    
+  Parent ! {Ref, (catch F(I))}.
+
+gather1(0, _, L) -> L;
+gather1(N, Ref, L) ->
+  receive
+    {Ref, Ret} -> gather1(N-1, Ref, [Ret|L])
+  end.
+
