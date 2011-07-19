@@ -57,22 +57,30 @@ get_shapes(File) ->
   end. 
 
 format_points([{X,Y}|T],Result, notfirst) ->
-  format_points(T,[io_lib:format("L~p,~p",[X,Y])|Result],notfirst);
+  %PointString = lists:flatten(["L", integer_to_list(X), ",", integer_to_list(Y)]),
+  PointString = lists:concat(["L",X,",",Y]),
+  format_points(T,[PointString|Result],notfirst);
 format_points([],Result,notfirst) -> lists:reverse(Result).
 
 format_points([]) -> [];
 format_points([{X,Y}|T]) ->
-  format_points(T,[io_lib:format("M~p,~p",[X,Y])],notfirst).
+  PointString = lists:concat(["M",X,",",Y]),
+  format_points(T,[PointString],notfirst).
 
 get_scaled_string(Part,{Scale,Xmin,Ymin,Height}) ->
   ScaledPoints = [{(X-Xmin)*Scale, Height-(Y-Ymin) * Scale} || {X,Y} <- Part],
   io:format(".",[]),
   format_points(ScaledPoints).
 
+get_scaled_points(Part,{Scale,Xmin,Ymin,Height}) ->
+  [{(X-Xmin)*Scale, Height-(Y-Ymin) * Scale} || {X,Y} <- Part].
+
 get_scaled_strings_for_polygon(Polygon, ScaleFactors,WriterPid) ->
-  {_, {Xmin, Ymin, Xmax, Ymax, Parts, Points}} = Polygon,
-  PolygonString = [get_scaled_string(X,ScaleFactors) || X <- Points],
-  WriterPid ! {line,PolygonString},
+  {_, {Xmin, Ymin, Xmax, Ymax, Parts, PartPoints}} = Polygon,
+  [WriterPid ! {points,get_scaled_points(X,ScaleFactors),self()} || X <- PartPoints],
+  receive
+    printed -> ok
+  end,
   ok.
 
 write_json(ShapeFile, JsonFile,Width, Height) ->
@@ -81,18 +89,35 @@ write_json(ShapeFile, JsonFile,Width, Height) ->
   XScale = Width/(Xmax - Xmin),
   YScale = Height/(Ymax - Ymin),
   Scale = max(XScale,YScale),
-  {ok, S} = file:open(JsonFile, write),
+  {ok, S} = file:open(JsonFile, [write,delayed_write]),
   io:format(S,"MapPoints = [",[]),
   WriterPid = spawn(fun() -> loop(S) end),
-  PolygonGroups = split_into_groups(Polygons, 5),
+  PolygonGroups = split_into_groups(Polygons, 128),
   io:format("Groups: ~p~n",[length(PolygonGroups)]),
   pmap1(fun(PSet) -> [get_scaled_strings_for_polygon(X,{Scale,Xmin, Ymin, Height},WriterPid) || X <- PSet] end, PolygonGroups),
   %[spawn(fun() -> get_scaled_strings_for_polygon(X,{Scale,Xmin, Ymin, Height},WriterPid) end) || X <- Polygons].
-%WriterPid ! {line,"];"},
+  %WriterPid ! {line,"];"},
   WriterPid ! close.
+
+print_points([{X,Y}|T],S,notfirst) ->
+  io:format(S,"L~p,~p",[X,Y]),
+  print_points(T,S,notfirst);
+print_points([],_,notfirst) -> ok.
+
+print_points([],S) -> [];
+print_points([{X,Y}|T],S) ->
+  io:format(S,"M~p,~p",[X,Y]),
+  print_points(T,S,notfirst).
 
 loop(S) ->
   receive
+    {points, Points, Parent} ->
+      io:format(".",[]),
+      io:format(S,"\"",[]),
+      print_points(Points,S),
+      io:format(S,"\",~n",[]),
+      Parent ! printed,
+      loop(S);
     {line, Text} ->
       io:format(S,"\"",[]),
       io:put_chars(S,Text),
@@ -131,3 +156,6 @@ gather1(N, Ref, L) ->
     {Ref, Ret} -> gather1(N-1, Ref, [Ret|L])
   end.
 
+pbuild_string(F, L) ->
+  Groups = split_into_groups(L,8),
+  [F(X) || X <- L].
