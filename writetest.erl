@@ -24,11 +24,26 @@ write_list(JsonFile,Max,ProcessFun) ->
   ProcessFun(List,Writer),
   Writer ! {close}. 
 
+write_out(_, _, 1000) -> 
+  ok;
+write_out(Writer, Output, Count) -> 
+  Writer ! {write, Output},
+  write_out(Writer, Output, Count + 1).
+
+write_list(JsonFile,Max) ->
+  {ok, S} = file:open(JsonFile, [write,delayed_write]),
+  Writer = spawn(writetest, file_writer, [S]),
+  List = lists:seq(1,Max,1000),
+  AccumulateFun = create_accumulate_string_fun(),
+  Result = writetest:accumulate_string(List, AccumulateFun),
+  write_out(Writer, Result, 1),
+  Writer ! {close}. 
+
 write_file(List,Writer, AccumulateFun) ->
   Writer ! {write, writetest:accumulate_string(List, AccumulateFun)}.
 
 eol() -> 
-  EndlineBinary = list_to_binary(io_lib:format("~n",[])).
+  list_to_binary(io_lib:format("~n",[])).
 
 create_accumulate_string_fun() -> 
   fun(I) -> integer_to_binary_string(I, eol()) end.
