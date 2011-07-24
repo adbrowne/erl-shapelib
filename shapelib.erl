@@ -58,7 +58,7 @@ get_shapes(File) ->
 
 format_points([{X,Y}|T],Result, notfirst) ->
   %PointString = lists:flatten(["L", integer_to_list(X), ",", integer_to_list(Y)]),
-  PointString = lists:concat(["L",X,",",Y]),
+  PointString = io_lib:format("L~p,~p",[X,Y]),
   format_points(T,[PointString|Result],notfirst);
 format_points([],Result,notfirst) -> lists:reverse(Result).
 
@@ -107,12 +107,15 @@ print_points([],_,notfirst) -> ok.
 print_points([],S) -> [];
 print_points([{X,Y}|T],S) ->
   io:format(S,"M~p,~p",[X,Y]),
-  print_points(T,S,notfirst).
+  Groups = split_into_groups(T, 8),
+  Output = lists:map(fun(PSet) -> format_points(PSet,[],notfirst) end, Groups),
+  [io:format(S,"~s",[X]) || X <- Output].
+  %print_points(T,S,notfirst).
 
 loop(S) ->
   receive
     {points, Points, Parent} ->
-      io:format(".",[]),
+      io:format("points~n",[]),
       io:format(S,"\"",[]),
       print_points(Points,S),
       io:format(S,"\",~n",[]),
