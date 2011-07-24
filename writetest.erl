@@ -20,7 +20,6 @@ integer_to_binary_string(I,EOL) ->
 write_list(JsonFile,Max,ProcessFun) ->
   {ok, S} = file:open(JsonFile, [write,delayed_write]),
   Writer = spawn(writetest, file_writer, [S]),
-  io:format("Writer ~p~n", [Writer]),
   List = lists:seq(1,Max),
   ProcessFun(List,Writer),
   Writer ! {close}. 
@@ -36,7 +35,7 @@ create_accumulate_string_fun() ->
 
 create_write_file_fun() -> 
   AccumulateStringFun = create_accumulate_string_fun(),
-  fun(List,Writer) -> io:format("Writer other ~p~n",[Writer]), writetest:write_file(List,Writer,AccumulateStringFun) end.
+  fun(List,Writer) -> writetest:write_file(List,Writer,AccumulateStringFun) end.
 
 create_process_group_fun(GroupSize) -> 
   WriteFileFun = create_write_file_fun(),
@@ -61,7 +60,7 @@ write_list_fewatatime(JsonFile,Max,GroupSize) ->
   write_list(JsonFile, Max, ProcessFun).
 
 write_list_parallel_fewatatime(JsonFile, Max, GroupSize, Processes) ->
-  ProcessFun = fun(List,Writer) -> io:format("Writer this ~p~n",[Writer]),parallel_process(List,Writer,GroupSize, Processes) end,
+  ProcessFun = fun(List,Writer) -> parallel_process(List,Writer,GroupSize, Processes) end,
   %ProcessFun = fun(List,Writer) -> io:format("Writer this ~p~n",[Writer]),some_fun(Writer) end,
   write_list(JsonFile, Max, ProcessFun).
 
@@ -80,25 +79,33 @@ processor_task(List, Sender, Ref) ->
   CreateString = create_accumulate_string_fun(),
   Sender ! {result, Ref, writetest:accumulate_string(List, CreateString)}.
 
-parallel_process(List, Writer, GroupSize, MaxProcesses, CurrentProcesses, 0, ProcessQueue) -> 
-  io:format("Writer empty : ~p~n",[Writer]),
-  ok;
+dequeue(List,Writer, GroupSize, MaxProcesses, CurrentProcesses, ListLength, ProcessQueue) ->
+  QueueResult = queue:out(ProcessQueue),
+  case QueueResult of
+    {{value, Ref}, RemainingQueue} ->
 
-parallel_process(List, Writer, GroupSize, MaxProcesses, CurrentProcesses, ListLength, ProcessQueue) -> 
-  io:format("Writer parallel_process: ~p~n",[Writer]),
-  if(CurrentProcesses < MaxProcesses) -> 
-      {ListRemainder, ListLengthRemainder, NewProcessRef} = spawn_processor(List, GroupSize, ListLength),
-      io:format("Spawning New ~p: ~p~n", [CurrentProcesses,NewProcessRef]),
-      parallel_process(ListRemainder, Writer, GroupSize, MaxProcesses, CurrentProcesses + 1, ListLengthRemainder, queue:in(NewProcessRef, ProcessQueue))
-      ; CurrentProcesses >= MaxProcesses -> 
-      {{value, Ref}, RemainingQueue} = queue:out(ProcessQueue),
-      io:format("Awaiting ~p, ~p~n", [Ref,Writer]),
+      %io:format("Awaiting ~p, ~p~n", [Ref,Writer]),
       receive
         {result, Ref, Output} -> 
           Writer ! {write, Output},
-          io:format("Output complete~n", []),
+          %io:format("Output complete~n", []),
           parallel_process(List, Writer, GroupSize, MaxProcesses, CurrentProcesses - 1, ListLength, RemainingQueue)
-      end
+      end;
+    {empty, _} -> 
+      ok
+  end.
+
+parallel_process(List, Writer, GroupSize, MaxProcesses, CurrentProcesses, 0, ProcessQueue) -> 
+  dequeue(List,Writer, GroupSize, MaxProcesses, CurrentProcesses-1, 0, ProcessQueue);
+
+parallel_process(List, Writer, GroupSize, MaxProcesses, CurrentProcesses, ListLength, ProcessQueue) -> 
+  %io:format("Writer parallel_process: ~p~n",[Writer]),
+  if(CurrentProcesses < MaxProcesses) -> 
+      {ListRemainder, ListLengthRemainder, NewProcessRef} = spawn_processor(List, GroupSize, ListLength),
+      %io:format("Spawning New ~p: ~p~n", [CurrentProcesses,NewProcessRef]),
+      parallel_process(ListRemainder, Writer, GroupSize, MaxProcesses, CurrentProcesses + 1, ListLengthRemainder, queue:in(NewProcessRef, ProcessQueue))
+      ; CurrentProcesses >= MaxProcesses -> 
+      dequeue(List,Writer, GroupSize, MaxProcesses, CurrentProcesses, ListLength, ProcessQueue)
   end.
 
 parallel_process(List, Writer, GroupSize, Processes) -> 
