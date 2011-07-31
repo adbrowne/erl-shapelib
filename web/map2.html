@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+    <style type="text/css">
+      html { height: 100% }
+      body { height: 100%; margin: 0; padding: 0 }
+      #map_canvas { height: 100% }
+    </style>
+    <script src="../outputdir/1.js"></script>
+    <script type="text/javascript"
+      src="http://maps.googleapis.com/maps/api/js?sensor=false">
+      </script>
+      <script type="text/javascript">
+        function initialize() {
+          var latlng = new google.maps.LatLng(-29.000221252441406,141.00265502929688);
+          var myOptions = {
+zoom: 2,
+      center: latlng,
+      mapTypeId: google.maps.MapTypeId.ROADMAP
+          };
+          var map = new google.maps.Map(document.getElementById("map_canvas"),
+              myOptions);
+
+
+          /*          var stateBorder = new google.maps.Polygon({
+paths: border,
+strokeCOlor: "#FF0000",
+stokeOpacity: 1.0,
+strokeWeight: 2,
+fillColor: "#FF0000",
+fillOpacity: 0.35
+
+});
+
+stateBorder.setMap(map); */
+
+         var triangleCoords = [];
+           var pointCount = MapPoints.length;
+           for(var pointIndex = 0; pointIndex < pointCount; pointIndex+=1){
+           var point = MapPoints[pointIndex];
+           if(point != undefined)
+           triangleCoords.push(new google.maps.LatLng(point[1], point[0]));
+           }
+ 
+/*var triangleCoords = [];
+
+triangleCoords.push(new google.maps.LatLng(25.774252, -80.190262));
+triangleCoords.push(new google.maps.LatLng(18.466465, -66.118292));
+triangleCoords.push(new google.maps.LatLng(32.321384, -64.75737));
+triangleCoords.push(new google.maps.LatLng(25.774252, -80.190262)); */
+
+    // Construct the polygon
+    // Note that we don't specify an array or arrays, but instead just
+    // a simple array of LatLngs in the paths property
+    bermudaTriangle = new google.maps.Polygon({
+paths: triangleCoords,
+strokeColor: "#FF0000",
+strokeOpacity: 0.8,
+strokeWeight: 2,
+fillColor: "#FF0000",
+fillOpacity: 0.35
+});
+
+    bermudaTriangle.setMap(map);
+
+    }
+
+  </script>
+</head>
+<body onload="initialize()">
+  <div id="map_canvas" style="width:100%; height:100%"></div>
+</body>
+  </html>

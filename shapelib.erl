@@ -75,10 +75,19 @@ get_scaled_string(Part,{Scale,Xmin,Ymin,Height}) ->
 get_scaled_points(Part,{Scale,Xmin,Ymin,Height}) ->
   [{(X-Xmin)*Scale, Height-(Y-Ymin) * Scale} || {X,Y} <- Part].
 
-get_scaled_strings_for_polygon(Polygon, ScaleFactors,WriterPid) ->
-  io:format("Polygon:~n",[]),
+get_strings_for_points(PartPoints, WriterPid) ->
+  [WriterPid ! {points,X,self()} || X <- PartPoints],
+  receive
+    printed -> ok
+  end,
+  ok.
+
+get_strings_for_polygon(Polygon, WriterPid) ->
   {_, {Xmin, Ymin, Xmax, Ymax, Parts, PartPoints}} = Polygon,
-  io:format("Post Polygon:~n",[]),
+  get_strings_for_points(PartPoints, WriterPid).
+
+get_scaled_strings_for_polygon(Polygon, ScaleFactors,WriterPid) ->
+  {_, {Xmin, Ymin, Xmax, Ymax, Parts, PartPoints}} = Polygon,
   [WriterPid ! {points,get_scaled_points(X,ScaleFactors),self()} || X <- PartPoints],
   receive
     printed -> ok
@@ -105,8 +114,8 @@ write_polygon_to_file(Polygon, FileName, {Scale, Width, Height, Xmin, Ymin, Xmax
   io:format("~s~n",[FileName]),
   {ok, S} = file:open(FileName, [write,delayed_write]),
   io:format(S,"MapPoints = [",[]),
-  WriterPid = spawn(fun() -> loop(S) end),
-  get_scaled_strings_for_polygon(Polygon,{Scale,Xmin, Ymin, Height},WriterPid),
+  WriterPid = spawn(fun() -> point_writer(S) end),
+  get_strings_for_polygon(Polygon,WriterPid),
   WriterPid ! close.
 
 write_polygons_to_dir([], _, _,_) ->
@@ -140,6 +149,24 @@ print_points([{X,Y}|T],S) ->
   Output = lists:map(fun(PSet) -> format_points(PSet,[],notfirst) end, Groups),
   [io:format(S,"~s",[X]) || X <- Output].
   %print_points(T,S,notfirst).
+
+print_pairs([], _) -> [];
+print_pairs([{X,Y}], S) -> 
+  io:format(S,"[~p,~p]",[X,Y]);
+print_pairs([{X,Y}|T], S) -> 
+  io:format(S,"[~p,~p],",[X,Y]),
+  print_pairs(T, S).
+
+point_writer(S) ->
+  receive
+    {points, Points, Parent} ->
+      print_pairs(Points,S),
+      Parent ! printed,
+      point_writer(S);
+    close ->
+      io:format(S,"];",[]),
+      file:close(S)
+  end.
 
 loop(S) ->
   receive
