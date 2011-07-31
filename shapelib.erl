@@ -76,7 +76,9 @@ get_scaled_points(Part,{Scale,Xmin,Ymin,Height}) ->
   [{(X-Xmin)*Scale, Height-(Y-Ymin) * Scale} || {X,Y} <- Part].
 
 get_scaled_strings_for_polygon(Polygon, ScaleFactors,WriterPid) ->
+  io:format("Polygon:~n",[]),
   {_, {Xmin, Ymin, Xmax, Ymax, Parts, PartPoints}} = Polygon,
+  io:format("Post Polygon:~n",[]),
   [WriterPid ! {points,get_scaled_points(X,ScaleFactors),self()} || X <- PartPoints],
   receive
     printed -> ok
@@ -99,6 +101,33 @@ write_json(ShapeFile, JsonFile,Width, Height) ->
   %WriterPid ! {line,"];"},
   WriterPid ! close.
 
+write_polygon_to_file(Polygon, FileName, {Scale, Width, Height, Xmin, Ymin, Xmax, Ymax}) ->
+  io:format("~s~n",[FileName]),
+  {ok, S} = file:open(FileName, [write,delayed_write]),
+  io:format(S,"MapPoints = [",[]),
+  WriterPid = spawn(fun() -> loop(S) end),
+  get_scaled_strings_for_polygon(Polygon,{Scale,Xmin, Ymin, Height},WriterPid),
+  WriterPid ! close.
+
+write_polygons_to_dir([], _, _,_) ->
+  ok;
+
+write_polygons_to_dir([H|T], OutputDir, Specs, Num) ->
+  write_polygon_to_file(H, OutputDir ++ "/"++integer_to_list(Num)++".js", Specs),
+  write_polygons_to_dir(T, OutputDir, Specs, Num+1).
+  
+write_polygons_to_dir(Polygons, OutputDir, Specs) ->
+  write_polygons_to_dir(Polygons, OutputDir, Specs, 0).
+
+write_json_multiple_files(ShapeFile, OutputDir, Width, Height) ->
+  Shapes = get_shapes(ShapeFile),
+  {_,_,{Xmin,Ymin,Xmax,Ymax},Polygons} = Shapes,
+  XScale = Width/(Xmax - Xmin),
+  YScale = Height/(Ymax - Ymin),
+  Scale = max(XScale,YScale),
+  Specs = {Scale, Width, Height, Xmin, Ymin, Xmax, Ymax},
+  write_polygons_to_dir(Polygons, OutputDir, Specs).
+
 print_points([{X,Y}|T],S,notfirst) ->
   io:format(S,"L~p,~p",[X,Y]),
   print_points(T,S,notfirst);
@@ -115,7 +144,6 @@ print_points([{X,Y}|T],S) ->
 loop(S) ->
   receive
     {points, Points, Parent} ->
-      io:format("points~n",[]),
       io:format(S,"\"",[]),
       print_points(Points,S),
       io:format(S,"\",~n",[]),
