@@ -62,32 +62,31 @@ format_points([{X,Y}|T],Result, notfirst) ->
   format_points(T,[PointString|Result],notfirst);
 format_points([],Result,notfirst) -> lists:reverse(Result).
 
-format_points([]) -> [];
-format_points([{X,Y}|T]) ->
-  PointString = lists:concat(["M",X,",",Y]),
-  format_points(T,[PointString],notfirst).
-
-get_scaled_string(Part,{Scale,Xmin,Ymin,Height}) ->
-  ScaledPoints = [{(X-Xmin)*Scale, Height-(Y-Ymin) * Scale} || {X,Y} <- Part],
-  io:format(".",[]),
-  format_points(ScaledPoints).
-
 get_scaled_points(Part,{Scale,Xmin,Ymin,Height}) ->
   [{(X-Xmin)*Scale, Height-(Y-Ymin) * Scale} || {X,Y} <- Part].
 
 get_strings_for_points(PartPoints, WriterPid) ->
-  [WriterPid ! {points,X,self()} || X <- PartPoints],
+  [WriterPid ! {points,[{X,Y} || {X,Y} <- Part], self()} || Part <- PartPoints],
   receive
     printed -> ok
   end,
   ok.
 
+get_non_points(Part) ->
+  [{X, Y} || {X,Y} <- Part].
+
 get_strings_for_polygon(Polygon, WriterPid) ->
   {_, {Xmin, Ymin, Xmax, Ymax, Parts, PartPoints}} = Polygon,
-  get_strings_for_points(PartPoints, WriterPid).
+  io:format("Writing Polygon!!!!!~n",[]),
+  [WriterPid ! {points,get_non_points(X),self()} || X <- PartPoints],
+  receive
+    printed -> ok
+  end,
+  ok.
 
 get_scaled_strings_for_polygon(Polygon, ScaleFactors,WriterPid) ->
   {_, {Xmin, Ymin, Xmax, Ymax, Parts, PartPoints}} = Polygon,
+  io:format("Writing Polygon!!!!!~n",[]),
   [WriterPid ! {points,get_scaled_points(X,ScaleFactors),self()} || X <- PartPoints],
   receive
     printed -> ok
@@ -103,6 +102,7 @@ write_json(ShapeFile, JsonFile,Width, Height) ->
   {ok, S} = file:open(JsonFile, [write,delayed_write]),
   io:format(S,"MapPoints = [",[]),
   WriterPid = spawn(fun() -> loop(S) end),
+  io:format("Polygons: ~p~n",[length(Polygons)]),
   PolygonGroups = split_into_groups(Polygons, 128),
   io:format("Groups: ~p~n",[length(PolygonGroups)]),
   pmap1(fun(PSet) -> [get_scaled_strings_for_polygon(X,{Scale,Xmin, Ymin, Height},WriterPid) || X <- PSet] end, PolygonGroups),
@@ -160,7 +160,10 @@ print_pairs([{X,Y}|T], S) ->
 point_writer(S) ->
   receive
     {points, Points, Parent} ->
+      io:format("Print Points~n",[]),
+      io:format(S,"[",[]),
       print_pairs(Points,S),
+      io:format(S,"],",[]),
       Parent ! printed,
       point_writer(S);
     close ->
@@ -171,6 +174,7 @@ point_writer(S) ->
 loop(S) ->
   receive
     {points, Points, Parent} ->
+      io:format("Print Points~n",[]),
       io:format(S,"\"",[]),
       print_points(Points,S),
       io:format(S,"\",~n",[]),

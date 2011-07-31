@@ -36,9 +36,9 @@ fillOpacity: 0.35
 stateBorder.setMap(map); */
 
          var triangleCoords = [];
-           var pointCount = MapPoints.length;
+           var pointCount = MapPoints[0].length;
            for(var pointIndex = 0; pointIndex < pointCount; pointIndex+=1){
-           var point = MapPoints[pointIndex];
+           var point = MapPoints[0][pointIndex];
            if(point != undefined)
            triangleCoords.push(new google.maps.LatLng(point[1], point[0]));
            }
